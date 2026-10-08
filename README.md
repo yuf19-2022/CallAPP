@@ -6,7 +6,7 @@
 
 ## 功能特点
 
-- 点击头像拨打普通电话、微信视频通话
+- 点击头像拨打系统语音电话、系统视频电话、微信视频通话
 - 添加、编辑、删除联系人姓名、图片、微信昵称/备注、语音播报内容
 - 查询通话记录（电话、微信）
 - 设置语音播报TTS音量、语速，点击联系人震动时长、强度
@@ -15,6 +15,19 @@
 - 导出联系人照片
 - 联系人数据库管理
 - 手机系统信息查看
+
+## 系统电话（语音 / 视频）
+
+系统电话通过默认电话应用（运营商电话）发起，与微信无关。联系人弹窗中：
+
+- 绿色按钮：**系统语音电话**，`Intent.ACTION_CALL` + `tel:`。
+- 青色按钮：**系统视频电话**，在语音电话基础上附加
+  `android.telecom.extra.START_CALL_WITH_VIDEO_STATE`（值 `3`，对应
+  `VideoProfile.STATE_BIDIRECTIONAL`，即双向视频）。
+
+是否真正以视频发起由机型和运营商是否支持视频通话决定；若机型忽略该参数，可能仍以语音发起。
+实现见 `lib/utls/system_call_util.dart`（`SystemCallUtil.voice` / `SystemCallUtil.video`）。
+非 Android 平台仅支持语音（`tel:`），不支持系统视频电话。
 
 ## 微信视频（wechat_video_call 2.0）
 

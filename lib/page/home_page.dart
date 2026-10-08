@@ -2,12 +2,12 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
 
-import 'package:android_intent_plus/android_intent.dart';
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:call/data/phone_info.dart';
 import 'package:call/utls/db_util.dart';
 import 'package:call/utls/flavor_util.dart';
 import 'package:call/utls/style_util.dart';
+import 'package:call/utls/system_call_util.dart';
 import 'package:call/utls/voice_vibration_util.dart';
 import 'package:call/utls/wechat_util.dart';
 import 'package:call/utls/widget_util.dart';
@@ -16,8 +16,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:wechat_video_call/wechat_video_call.dart';
 
 import 'menu_page.dart';
@@ -311,32 +309,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildButton(
-    PhoneInfo? info,
-    Color color,
-    IconData iconData, {
+  Widget _buildButton({
+    required Color color,
+    required IconData iconData,
+    required VoidCallback onTap,
+    VoidCallback? onLongPress,
     double? w,
     double? h,
   }) {
     return GestureDetector(
-      onTap: () {
-        if (info != null) {
-          if (iconData == CupertinoIcons.videocam_fill) {
-            _wechat(info);
-          } else if (iconData == CupertinoIcons.phone_down_fill) {
-            _hangUp();
-          } else {
-            _call(info);
-          }
-        }
-        SmartDialog.dismiss(status: SmartStatus.allDialog);
-      },
-      onLongPress: () {
-        // 长按红色按钮：取消进行中的微信拨打会话。
-        if (iconData == CupertinoIcons.phone_down_fill) {
-          _cancelWvc();
-        }
-      },
+      onTap: onTap,
+      onLongPress: onLongPress,
       child: Card(
         color: color,
         child: SizedBox(
@@ -346,6 +329,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  /// 关闭弹窗并执行 [action]。
+  void _dismissAnd(VoidCallback action) {
+    action();
+    SmartDialog.dismiss(status: SmartStatus.allDialog);
   }
 
   Widget _buildDialogLandscape(PhoneInfo info, int num, bool wechat) {
@@ -373,26 +362,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     visible: info.wechat.isNotEmpty && wechat,
                     child: Expanded(
                       child: _buildButton(
-                        info,
-                        Colors.blue,
-                        CupertinoIcons.videocam_fill,
+                        color: Colors.blue,
+                        iconData: CupertinoIcons.videocam_fill,
+                        onTap: () => _dismissAnd(() => _wechat(info)),
                         w: 180,
                       ),
                     ),
                   ),
                   Expanded(
                     child: _buildButton(
-                      info,
-                      Colors.green,
-                      CupertinoIcons.phone_fill,
+                      color: Colors.teal,
+                      iconData: CupertinoIcons.videocam,
+                      onTap: () => _dismissAnd(() => _systemVideo(info)),
                       w: 180,
                     ),
                   ),
                   Expanded(
                     child: _buildButton(
-                      info,
-                      Colors.red,
-                      CupertinoIcons.phone_down_fill,
+                      color: Colors.green,
+                      iconData: CupertinoIcons.phone_fill,
+                      onTap: () => _dismissAnd(() => _call(info)),
+                      w: 180,
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildButton(
+                      color: Colors.red,
+                      iconData: CupertinoIcons.phone_down_fill,
+                      onTap: () => _dismissAnd(_hangUp),
+                      onLongPress: _cancelWvc,
                       w: 180,
                     ),
                   ),
@@ -426,14 +424,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         Visibility(
           visible: info.wechat.isNotEmpty && wechat,
           child: _buildButton(
-            info,
-            Colors.blue,
-            CupertinoIcons.videocam_fill,
+            color: Colors.blue,
+            iconData: CupertinoIcons.videocam_fill,
+            onTap: () => _dismissAnd(() => _wechat(info)),
             h: 68,
           ),
         ),
-        _buildButton(info, Colors.green, CupertinoIcons.phone_fill, h: 68),
-        _buildButton(info, Colors.red, CupertinoIcons.phone_down_fill, h: 68),
+        _buildButton(
+          color: Colors.teal,
+          iconData: CupertinoIcons.videocam,
+          onTap: () => _dismissAnd(() => _systemVideo(info)),
+          h: 68,
+        ),
+        _buildButton(
+          color: Colors.green,
+          iconData: CupertinoIcons.phone_fill,
+          onTap: () => _dismissAnd(() => _call(info)),
+          h: 68,
+        ),
+        _buildButton(
+          color: Colors.red,
+          iconData: CupertinoIcons.phone_down_fill,
+          onTap: () => _dismissAnd(_hangUp),
+          onLongPress: _cancelWvc,
+          h: 68,
+        ),
       ],
     );
   }
@@ -488,26 +503,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _call(PhoneInfo info) async {
     DbUtil().addRecord(info);
 
-    bool open = false;
-    if (Platform.isAndroid) {
-      if (await Permission.phone.request().isGranted) {
-        // Either the permission was already granted before or the user just granted it.
-        AndroidIntent intent = AndroidIntent(
-          action: 'android.intent.action.CALL',
-          data: 'tel:${info.phone}',
-        );
-        await intent.launch();
-        open = true;
-      }
-    }
+    final bool open = await SystemCallUtil().voice(info.phone);
     if (!open) {
-      Uri url = Uri(scheme: 'tel', path: info.phone);
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url);
-      } else {
-        WidgetUtil.showToast('拨号失败');
-      }
+      WidgetUtil.showToast('拨号失败');
     }
+  }
+
+  /// 拨打系统视频电话（走默认电话应用，与微信无关）。
+  Future<void> _systemVideo(PhoneInfo info) async {
+    final bool open = await SystemCallUtil().video(info.phone);
+    if (!open) {
+      WidgetUtil.showToast(
+        Platform.isAndroid ? '无法发起系统视频通话，请检查电话权限' : '暂不支持系统视频通话',
+      );
+      return;
+    }
+    DbUtil().addRecord(info);
   }
 
   Future<void> _wechat(PhoneInfo info) async {
