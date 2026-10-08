@@ -1,6 +1,4 @@
 import 'dart:io';
-import 'dart:math';
-import 'dart:ui';
 
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:call/data/phone_info.dart';
@@ -9,14 +7,10 @@ import 'package:call/utls/flavor_util.dart';
 import 'package:call/utls/style_util.dart';
 import 'package:call/utls/system_call_util.dart';
 import 'package:call/utls/voice_vibration_util.dart';
-import 'package:call/utls/wechat_util.dart';
 import 'package:call/utls/widget_util.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:wechat_video_call/wechat_video_call.dart';
 
 import 'menu_page.dart';
 
@@ -27,63 +21,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-  /// 拨打前缓存的微信就绪状态（无障碍 + 校准）。
-  bool _wechatReady = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    WechatUtil().subscribeEvents(_onWvcEvent);
-    _refreshWechatReady();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    WechatUtil().subscribeEvents(null);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _refreshWechatReady();
-    }
-  }
-
-  Future<void> _refreshWechatReady() async {
-    if (!Platform.isAndroid) {
-      if (mounted) setState(() => _wechatReady = false);
-      return;
-    }
-    try {
-      final status = await WechatUtil().permissionStatus();
-      final progress = await WechatUtil().calibrationProgress();
-      if (!mounted) return;
-      setState(() {
-        // 2.0：无障碍 + 已装微信 + 必录点齐全才可点视频。
-        _wechatReady = status.accessibility &&
-            status.wechatInstalled &&
-            progress.readyForVideo;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _wechatReady = false);
-    }
-  }
-
-  void _onWvcEvent(WeChatCallEvent e) {
-    final msg = WechatUtil.describeEvent(e);
-    // 只提示关键结果，避免 stepProgress 刷屏。
-    if (e.type == WvcEventTypes.sessionFailed ||
-        e.type == WvcEventTypes.sessionSuccess ||
-        e.type == WvcEventTypes.sessionStarted ||
-        e.type == WvcEventTypes.configMismatch) {
-      WidgetUtil.showToast(msg);
-    }
-  }
-
+class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     SystemUiOverlayStyle systemUiOverlayStyle = SystemUiOverlayStyle(
@@ -233,7 +171,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _infoCard(BuildContext context, PhoneInfo info) {
     Offset startOffset = Offset.infinite;
     return GestureDetector(
-      onTap: () => _showDialog(info),
+      onTap: () => _onTap(info),
       onLongPressStart: (LongPressStartDetails details) {
         startOffset = details.globalPosition;
       },
@@ -246,8 +184,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             context,
             MaterialPageRoute(builder: (context) => MenuPage()),
           );
-        } else if (!distance) {
-          _showDialog(info);
         }
       },
       child: Card(color: info.color(), child: _picture(info)),
@@ -285,228 +221,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildCallNum(int num) {
-    return Visibility(
-      visible: (num > 0),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: AutoSizeText.rich(
-          maxFontSize: 40,
-          TextSpan(
-            children: [
-              const TextSpan(text: '今天已打 '),
-              TextSpan(
-                text: num.toString(),
-                style: const TextStyle(color: Colors.red),
-              ),
-              const TextSpan(text: ' 次'),
-            ],
-          ),
-          style: StyleUtil.textLargeBlack,
-          maxLines: 1,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildButton({
-    required Color color,
-    required IconData iconData,
-    required VoidCallback onTap,
-    VoidCallback? onLongPress,
-    double? w,
-    double? h,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Card(
-        color: color,
-        child: SizedBox(
-          width: w ?? double.infinity,
-          height: h ?? double.infinity,
-          child: Icon(iconData, color: Colors.white70, size: 68),
-        ),
-      ),
-    );
-  }
-
-  /// 关闭弹窗并执行 [action]。
-  void _dismissAnd(VoidCallback action) {
-    action();
-    SmartDialog.dismiss(status: SmartStatus.allDialog);
-  }
-
-  Widget _buildDialogLandscape(PhoneInfo info, int num, bool wechat) {
-    return Column(
-      children: [
-        Expanded(
-          child: Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    if (info.wechat.isNotEmpty && wechat) {
-                      _wechat(info);
-                    } else {
-                      _call(info);
-                    }
-                    SmartDialog.dismiss(status: SmartStatus.allDialog);
-                  },
-                  child: Card(color: info.color(), child: _picture(info)),
-                ),
-              ),
-              Column(
-                children: [
-                  Visibility(
-                    visible: info.wechat.isNotEmpty && wechat,
-                    child: Expanded(
-                      child: _buildButton(
-                        color: Colors.blue,
-                        iconData: CupertinoIcons.videocam_fill,
-                        onTap: () => _dismissAnd(() => _wechat(info)),
-                        w: 180,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: _buildButton(
-                      color: Colors.teal,
-                      iconData: CupertinoIcons.videocam,
-                      onTap: () => _dismissAnd(() => _systemVideo(info)),
-                      w: 180,
-                    ),
-                  ),
-                  Expanded(
-                    child: _buildButton(
-                      color: Colors.green,
-                      iconData: CupertinoIcons.phone_fill,
-                      onTap: () => _dismissAnd(() => _call(info)),
-                      w: 180,
-                    ),
-                  ),
-                  Expanded(
-                    child: _buildButton(
-                      color: Colors.red,
-                      iconData: CupertinoIcons.phone_down_fill,
-                      onTap: () => _dismissAnd(_hangUp),
-                      onLongPress: _cancelWvc,
-                      w: 180,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        _buildCallNum(num),
-      ],
-    );
-  }
-
-  Widget _buildDialogPortrait(PhoneInfo info, int num, bool wechat) {
-    return Column(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () {
-              if (info.wechat.isNotEmpty && wechat) {
-                _wechat(info);
-              } else {
-                _call(info);
-              }
-              SmartDialog.dismiss(status: SmartStatus.allDialog);
-            },
-            child: Card(color: info.color(), child: _picture(info)),
-          ),
-        ),
-        _buildCallNum(num),
-        Visibility(
-          visible: info.wechat.isNotEmpty && wechat,
-          child: _buildButton(
-            color: Colors.blue,
-            iconData: CupertinoIcons.videocam_fill,
-            onTap: () => _dismissAnd(() => _wechat(info)),
-            h: 68,
-          ),
-        ),
-        _buildButton(
-          color: Colors.teal,
-          iconData: CupertinoIcons.videocam,
-          onTap: () => _dismissAnd(() => _systemVideo(info)),
-          h: 68,
-        ),
-        _buildButton(
-          color: Colors.green,
-          iconData: CupertinoIcons.phone_fill,
-          onTap: () => _dismissAnd(() => _call(info)),
-          h: 68,
-        ),
-        _buildButton(
-          color: Colors.red,
-          iconData: CupertinoIcons.phone_down_fill,
-          onTap: () => _dismissAnd(_hangUp),
-          onLongPress: _cancelWvc,
-          h: 68,
-        ),
-      ],
-    );
-  }
-
-  void _showDialog(PhoneInfo info) async {
+  /// 点击联系人：播报 + 震动后直接拨打系统视频电话。
+  void _onTap(PhoneInfo info) {
     TtsVibrationUtil().speak(info);
     TtsVibrationUtil().vibration();
-    final int num = await DbUtil().getTodayNum(info.phone);
-    await _refreshWechatReady();
-    bool wechat = _wechatReady;
-    await SmartDialog.show(
-      builder: (context) {
-        double w = MediaQuery.of(context).size.width / 1.25;
-        double h = w * 1.68;
-        h = min(h, MediaQuery.of(context).size.height);
-        if (MediaQuery.of(context).orientation == Orientation.landscape) {
-          h = MediaQuery.of(context).size.height / 1.25;
-          w = h * 1.68;
-          w = min(w, MediaQuery.of(context).size.width);
-        }
-        Widget child =
-            MediaQuery.of(context).orientation == Orientation.portrait
-            ? _buildDialogPortrait(info, num, wechat)
-            : _buildDialogLandscape(info, num, wechat);
-        child = child.animate().shimmer(
-          duration: 1500.ms,
-          color: Colors.white.withValues(alpha: 0.4),
-        );
-
-        return Container(
-          constraints: BoxConstraints(maxWidth: w, maxHeight: h),
-          decoration: BoxDecoration(
-            color: Colors.white60,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.all(15),
-          child: child,
-        );
-      },
-      maskWidget: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-        child: Container(
-          width: double.infinity,
-          height: double.infinity,
-          color: Colors.black54,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _call(PhoneInfo info) async {
-    DbUtil().addRecord(info);
-
-    final bool open = await SystemCallUtil().voice(info.phone);
-    if (!open) {
-      WidgetUtil.showToast('拨号失败');
-    }
+    _systemVideo(info);
   }
 
   /// 拨打系统视频电话（走默认电话应用，与微信无关）。
@@ -519,52 +238,5 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
     DbUtil().addRecord(info);
-  }
-
-  Future<void> _wechat(PhoneInfo info) async {
-    if (!Platform.isAndroid) {
-      WidgetUtil.showToast('暂不支持');
-      return;
-    }
-    if (info.wechat.trim().isEmpty) {
-      WidgetUtil.showToast('请先为联系人填写微信备注');
-      return;
-    }
-
-    final ok = await WechatUtil().video(
-      info,
-      onStatus: WidgetUtil.showToast,
-    );
-    if (ok) {
-      DbUtil().addWechatRecord(info);
-      await _refreshWechatReady();
-    } else {
-      // 未校准 / 无权限时引导去权限页
-      final progress = await WechatUtil().calibrationProgress();
-      if (!progress.readyForVideo && mounted) {
-        WidgetUtil.showToast('请先完成微信坐标校准');
-      }
-      await _refreshWechatReady();
-    }
-  }
-
-  Future<void> _hangUp() async {
-    if (!Platform.isAndroid) {
-      WidgetUtil.showToast('暂不支持');
-      return;
-    }
-    final ok = await WechatUtil().hangUp();
-    WidgetUtil.showToast(ok ? '已尝试挂断' : '挂断失败，请先校准挂断点');
-    SmartDialog.dismiss(status: SmartStatus.allDialog);
-  }
-
-  Future<void> _cancelWvc() async {
-    if (!Platform.isAndroid) {
-      WidgetUtil.showToast('暂不支持');
-      return;
-    }
-    final ok = await WechatUtil().cancel();
-    WidgetUtil.showToast(ok ? '已取消拨打' : '当前没有进行中的拨打');
-    SmartDialog.dismiss(status: SmartStatus.allDialog);
   }
 }
